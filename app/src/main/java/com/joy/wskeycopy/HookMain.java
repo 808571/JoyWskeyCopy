@@ -10,7 +10,6 @@ import android.widget.Toast;
 
 import java.lang.reflect.Method;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -34,8 +33,6 @@ public class HookMain implements IXposedHookLoadPackage {
 
     /** 已复制的值，避免同一串被重复刷屏 */
     private static volatile String sLastCopied = null;
-    /** 首次命中后是否停止后续 hook 工作，降低对京东的影响 */
-    private static final AtomicBoolean sDone = new AtomicBoolean(false);
 
     private static Context sAppContext = null;
 
@@ -94,7 +91,6 @@ public class HookMain implements IXposedHookLoadPackage {
                     String.class, String.class, new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
-                            if (sDone.get()) return;
                             String key = (String) param.args[0];
                             Object val = param.getResult();
                             if (val instanceof String) {
@@ -110,7 +106,6 @@ public class HookMain implements IXposedHookLoadPackage {
             XposedHelpers.findAndHookMethod(spImpl, "getAll", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    if (sDone.get()) return;
                     Object res = param.getResult();
                     if (res instanceof Map) {
                         for (Object o : ((Map<?, ?>) res).entrySet()) {
@@ -140,7 +135,6 @@ public class HookMain implements IXposedHookLoadPackage {
             XposedHelpers.findAndHookMethod(builder, "build", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    if (sDone.get()) return;
                     Object req = param.getResult();
                     if (req == null) return;
                     try {
@@ -172,7 +166,6 @@ public class HookMain implements IXposedHookLoadPackage {
                     "setRequestProperty", String.class, String.class, new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
-                            if (sDone.get()) return;
                             String name = (String) param.args[0];
                             String value = (String) param.args[1];
                             if (value != null && name != null
@@ -194,14 +187,18 @@ public class HookMain implements IXposedHookLoadPackage {
     private static void checkAndCopy(String key, String value) {
         if (value == null || value.isEmpty()) return;
 
+        // 调试：把原始值打出来，便于确认真实形态与分隔符
+        if (value.toLowerCase().contains("wskey")) {
+            log("原始值 key=" + key + " | value=" + value);
+        }
+
         String found = extractWskey(key, value);
         if (found == null) return;
 
         if (found.equals(sLastCopied)) return;
-        if (!sDone.compareAndSet(false, true)) return;
-
+        // 注意：这里不再"命中一次就永久停止"，改为允许更新为新值
         sLastCopied = found;
-        log("命中 wskey, 长度=" + found.length());
+        log("命中 wskey, 长度=" + found.length() + " | 值=" + found);
         copyToClipboard(found);
     }
 
@@ -215,11 +212,12 @@ public class HookMain implements IXposedHookLoadPackage {
         int idx = lower.indexOf("wskey=");
         if (idx >= 0) {
             String after = value.substring(idx + "wskey=".length());
-            // 截到分号/空格/换行为止
+            // 截到真正的分隔符为止：分号/逗号/空白/&/引号
             int end = after.length();
             for (int i = 0; i < after.length(); i++) {
                 char c = after.charAt(i);
-                if (c == ';' || c == ' ' || c == '\n' || c == '\r' || c == '&') {
+                if (c == ';' || c == ',' || c == '&' || c == '"' || c == '\''
+                        || c == ' ' || c == '\t' || c == '\n' || c == '\r') {
                     end = i;
                     break;
                 }
@@ -237,7 +235,9 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     /**
-     * wskey 的形态校验：京东 wskey 长度较长，且为字母数字组合。
+     * wskey 的形态校验。
+     * 放宽为：长度 >= 16，且不含分隔符/空白/中文字符即可。
+     * 京东 wskey 可能包含 base64 字符（+ / =）与点号，不能只用字母数字白名单。
      */
     private static boolean isValidWskey(String s) {
         if (s == null) return false;
@@ -245,11 +245,11 @@ public class HookMain implements IXposedHookLoadPackage {
         if (s.length() < 16) return false;
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-            boolean ok = (c >= '0' && c <= '9')
-                    || (c >= 'a' && c <= 'z')
-                    || (c >= 'A' && c <= 'Z')
-                    || c == '*' || c == '-' || c == '_';
-            if (!ok) return false;
+            // 排除分隔符、空白、控制字符与非 ASCII
+            if (c <= 0x20 || c == ';' || c == ',' || c == '&'
+                    || c == '"' || c == '\'' || c >= 0x7F) {
+                return false;
+            }
         }
         return true;
     }
