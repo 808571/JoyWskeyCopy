@@ -212,12 +212,10 @@ public class HookMain implements IXposedHookLoadPackage {
         int idx = lower.indexOf("wskey=");
         if (idx >= 0) {
             String after = value.substring(idx + "wskey=".length());
-            // 截到真正的分隔符为止：分号/逗号/空白/&/引号
+            // 截到分隔符为止：兼容半角与全角（；，：）
             int end = after.length();
             for (int i = 0; i < after.length(); i++) {
-                char c = after.charAt(i);
-                if (c == ';' || c == ',' || c == '&' || c == '"' || c == '\''
-                        || c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                if (isSeparator(after.charAt(i))) {
                     end = i;
                     break;
                 }
@@ -226,7 +224,7 @@ public class HookMain implements IXposedHookLoadPackage {
             if (isValidWskey(token)) return token;
         }
 
-        // 形态二：key 里带 wskey，value 就是完整凭证
+        // 形态二：整个 value 就是纯凭证（不含 "wskey=" 前缀，也不含分隔符）
         if (key != null && key.toLowerCase().contains("wskey") && isValidWskey(value)) {
             return value.trim();
         }
@@ -235,9 +233,29 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     /**
+     * 是否为分隔符。同时兼容半角与全角标点，
+     * 京东的 Cookie 串里常见全角分号（；U+FF1B）。
+     */
+    private static boolean isSeparator(char c) {
+        switch (c) {
+            // 半角
+            case ';': case ',': case '&': case '"': case '\'':
+            case ' ': case '\t': case '\n': case '\r': case ':':
+            // 全角
+            case '\uFF1B': // ；
+            case '\uFF0C': // ，
+            case '\uFF1A': // ：
+            case '\uFF06': // ＆
+            case '\u3000': // 全角空格
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
      * wskey 的形态校验。
-     * 放宽为：长度 >= 16，且不含分隔符/空白/中文字符即可。
-     * 京东 wskey 可能包含 base64 字符（+ / =）与点号，不能只用字母数字白名单。
+     * 仅长度下限 + 排除分隔符/空白/控制字符，不因非 ASCII 一概否决。
      */
     private static boolean isValidWskey(String s) {
         if (s == null) return false;
@@ -245,11 +263,7 @@ public class HookMain implements IXposedHookLoadPackage {
         if (s.length() < 16) return false;
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-            // 排除分隔符、空白、控制字符与非 ASCII
-            if (c <= 0x20 || c == ';' || c == ',' || c == '&'
-                    || c == '"' || c == '\'' || c >= 0x7F) {
-                return false;
-            }
+            if (c <= 0x20 || isSeparator(c)) return false;
         }
         return true;
     }
