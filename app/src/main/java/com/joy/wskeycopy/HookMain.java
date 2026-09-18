@@ -187,8 +187,9 @@ public class HookMain implements IXposedHookLoadPackage {
     private static void checkAndCopy(String key, String value) {
         if (value == null || value.isEmpty()) return;
 
-        // 调试：把原始值打出来，便于确认真实形态与分隔符
-        if (value.toLowerCase().contains("wskey")) {
+        // 调试：把原始值打出来，便于确认真实形态
+        String lv = value.toLowerCase();
+        if (lv.contains("wskey") || lv.contains("pin=")) {
             log("原始值 key=" + key + " | value=" + value);
         }
 
@@ -203,44 +204,62 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     /**
-     * 从键值中提取 wskey 串。
-     * 兼容两种形态：纯值（sp 里直接存的）与 Cookie 串（wskey=xxx; 形式）。
+     * 从键值中提取验证串，输出格式固定为：pin=xxx;wskey=yyy;
+     *
+     * 京东的登录态形态为 "pin=jd_xxx;wskey=AAJqm...;"，
+     * 因此这里分别取 pin 与 wskey 两个字段再拼装，
+     * 避免"整串复制"时把其它无关 Cookie 一起带出。
      */
     private static String extractWskey(String key, String value) {
-        // 形态一：Cookie 串，找 wskey= 后面的部分
-        String lower = value.toLowerCase();
-        int idx = lower.indexOf("wskey=");
-        if (idx >= 0) {
-            String after = value.substring(idx + "wskey=".length());
-            // 截到分隔符为止：兼容半角与全角（；，：）
-            int end = after.length();
-            for (int i = 0; i < after.length(); i++) {
-                if (isSeparator(after.charAt(i))) {
-                    end = i;
-                    break;
-                }
+        String pin = extractField(value, "pin");
+        String wskey = extractField(value, "wskey");
+
+        if (wskey == null) {
+            // 兼容"value 本身就是纯 wskey"的情况
+            if (key != null && key.toLowerCase().contains("wskey") && isValidWskey(value)) {
+                wskey = value.trim();
             }
-            String token = after.substring(0, end).trim();
-            if (isValidWskey(token)) return token;
         }
+        if (wskey == null) return null;
 
-        // 形态二：整个 value 就是纯凭证（不含 "wskey=" 前缀，也不含分隔符）
-        if (key != null && key.toLowerCase().contains("wskey") && isValidWskey(value)) {
-            return value.trim();
+        // 组装成完整验证串
+        if (pin != null) {
+            return "pin=" + pin + ";wskey=" + wskey + ";";
         }
-
-        return null;
+        return "wskey=" + wskey + ";";
     }
 
     /**
-     * 是否为分隔符。同时兼容半角与全角标点，
-     * 京东的 Cookie 串里常见全角分号（；U+FF1B）。
+     * 从形如 "pin=xxx;wskey=yyy;" 的串中，取指定字段的值。
+     * 找不到返回 null。
+     */
+    private static String extractField(String src, String field) {
+        if (src == null) return null;
+        String lower = src.toLowerCase();
+        String needle = field.toLowerCase() + "=";
+        int idx = lower.indexOf(needle);
+        if (idx < 0) return null;
+
+        String after = src.substring(idx + needle.length());
+        int end = after.length();
+        for (int i = 0; i < after.length(); i++) {
+            if (isSeparator(after.charAt(i))) {
+                end = i;
+                break;
+            }
+        }
+        String v = after.substring(0, end).trim();
+        return v.isEmpty() ? null : v;
+    }
+
+    /**
+     * 是否为分隔符。同时兼容半角与全角标点。
      */
     private static boolean isSeparator(char c) {
         switch (c) {
             // 半角
             case ';': case ',': case '&': case '"': case '\'':
-            case ' ': case '\t': case '\n': case '\r': case ':':
+            case ' ': case '\t': case '\n': case '\r':
             // 全角
             case '\uFF1B': // ；
             case '\uFF0C': // ，
