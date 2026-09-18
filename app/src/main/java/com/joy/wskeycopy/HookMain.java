@@ -81,6 +81,7 @@ public class HookMain implements IXposedHookLoadPackage {
         try {
             spImpl = XposedHelpers.findClass(
                     "android.app.SharedPreferencesImpl", lpparam.classLoader);
+            log("找到 SharedPreferencesImpl，开始安装 hook");
         } catch (Throwable t) {
             log("找不到 SharedPreferencesImpl: " + t);
             return;
@@ -132,32 +133,56 @@ public class HookMain implements IXposedHookLoadPackage {
         try {
             Class<?> builder = XposedHelpers.findClass(
                     "okhttp3.Request$Builder", lpparam.classLoader);
+            log("找到 okhttp3.Request$Builder，开始安装 hook");
             XposedHelpers.findAndHookMethod(builder, "build", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Object req = param.getResult();
                     if (req == null) return;
                     try {
+                        // 1) 全量扫描所有 header（不只 Cookie）
                         Object headers = XposedHelpers.callMethod(req, "headers");
-                        Object cookie = XposedHelpers.callMethod(headers, "get", "Cookie");
-                        if (cookie == null) {
-                            cookie = XposedHelpers.callMethod(headers, "get", "cookie");
+                        int size = (Integer) XposedHelpers.callMethod(headers, "size");
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i < size; i++) {
+                            String hn = (String) XposedHelpers.callMethod(headers, "name", i);
+                            String hv = (String) XposedHelpers.callMethod(headers, "value", i);
+                            sb.append(hn).append("=[").append(hv).append("] ");
+                            // header 名或值里出现 wskey/pin 都要检
+                            checkAndCopy(hn, hv);
                         }
-                        if (cookie instanceof String) {
-                            checkAndCopy("Cookie", (String) cookie);
+                        // 只在疑似含凭证时打印，避免刷屏
+                        String all = sb.toString().toLowerCase();
+                        if (all.contains("wskey") || all.contains("pin=")) {
+                            log("okhttp headers: " + sb);
                         }
-                    } catch (Throwable ignored) {
+
+                        // 2) URL 与请求体也扫一遍
+                        Object url = XposedHelpers.callMethod(req, "url");
+                        if (url != null) {
+                            checkAndCopy("url", url.toString());
+                        }
+                        Object body = XposedHelpers.callMethod(req, "body");
+                        if (body != null) {
+                            Object content = XposedHelpers.callMethod(body, "toString");
+                            if (content instanceof String) {
+                                checkAndCopy("body", (String) content);
+                            }
+                        }
+                    } catch (Throwable t) {
+                        log("okhttp build 处理异常: " + t);
                     }
                 }
             });
-            log("okhttp hook 已安装");
+            log("okhttp hook 安装成功");
         } catch (Throwable t) {
-            log("未找到 okhttp3，跳过（正常，可能被加固改名）");
+            log("未找到 okhttp3.Request$Builder —— " + t);
         }
     }
 
     /**
      * hook HttpURLConnection 设置请求头，兜底那些不走 okhttp 的请求。
+     * 注意：这里记录所有 header，不只 Cookie。
      */
     private void hookHttpURLConnection(XC_LoadPackage.LoadPackageParam lpparam) {
         try {
@@ -168,12 +193,12 @@ public class HookMain implements IXposedHookLoadPackage {
                         protected void beforeHookedMethod(MethodHookParam param) {
                             String name = (String) param.args[0];
                             String value = (String) param.args[1];
-                            if (value != null && name != null
-                                    && name.equalsIgnoreCase("Cookie")) {
-                                checkAndCopy(name, value);
-                            }
+                            if (name == null || value == null) return;
+                            // 任何 header 都交给统一判定
+                            checkAndCopy(name, value);
                         }
                     });
+            log("URLConnection hook 安装成功");
         } catch (Throwable t) {
             log("hook setRequestProperty 失败: " + t);
         }
@@ -187,19 +212,19 @@ public class HookMain implements IXposedHookLoadPackage {
     private static void checkAndCopy(String key, String value) {
         if (value == null || value.isEmpty()) return;
 
-        // 调试：把原始值打出来，便于确认真实形态
         String lv = value.toLowerCase();
         if (lv.contains("wskey") || lv.contains("pin=")) {
-            log("原始值 key=" + key + " | value=" + value);
+            log("【原始值】source=" + key
+                    + " len=" + value.length()
+                    + " | " + value);
         }
 
         String found = extractWskey(key, value);
         if (found == null) return;
 
         if (found.equals(sLastCopied)) return;
-        // 注意：这里不再"命中一次就永久停止"，改为允许更新为新值
         sLastCopied = found;
-        log("命中 wskey, 长度=" + found.length() + " | 值=" + found);
+        log("【命中】验证串长度=" + found.length() + " | " + found);
         copyToClipboard(found);
     }
 
