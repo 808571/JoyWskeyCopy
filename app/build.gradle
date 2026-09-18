@@ -1,0 +1,50 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.joy.wskeycopy'
+    compileSdk 33
+
+    defaultConfig {
+        applicationId "com.joy.wskeycopy"
+        minSdk 21
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    packaging {
+        resources {
+            // 只排除会冲突的许可证/元数据，不动签名文件
+            excludes += [
+                    'META-INF/LICENSE',
+                    'META-INF/LICENSE.txt',
+                    'META-INF/NOTICE',
+                    'META-INF/NOTICE.txt',
+                    'META-INF/DEPENDENCIES',
+                    'META-INF/*.kotlin_module'
+            ]
+        }
+    }
+}
+
+dependencies {
+    // 本地 jar，避免云端构建时依赖 api.xposed.info 拉取失败
+    // 注意必须是 compileOnly：Xposed API 类不能打进 APK
+    compileOnly files('libs/XposedBridgeApi-82.jar')
+}

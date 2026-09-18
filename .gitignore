@@ -1,0 +1,22 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# APK 产物
+*.apk
+*.ap_
+*.dex
+
+# 注意：以下内容必须提交，不要忽略
+#   gradle/wrapper/gradle-wrapper.jar
+#   app/libs/XposedBridgeApi-82.jar
+# 它们被 ! 规则显式保留
+!gradle/wrapper/gradle-wrapper.jar
+!app/libs/*.jar

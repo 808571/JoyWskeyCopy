@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 仅作用于京东，避免影响其他应用 -->
+    <string-array name="xposed_scope">
+        <item>com.jingdong.app.mall</item>
+    </string-array>
+</resources>
