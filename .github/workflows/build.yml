@@ -19,13 +19,25 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 检查预装的 Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls -d $ANDROID_HOME 2>/dev/null || echo "预装 SDK 目录不存在"
+          ls $ANDROID_HOME/platforms/ 2>/dev/null || true
+          ls $ANDROID_HOME/build-tools/ 2>/dev/null || true
 
       - name: 安装所需 SDK 组件
         run: |
-          sdkmanager "platforms;android-33" "build-tools;33.0.2" "platform-tools"
-          yes | sdkmanager --licenses || true
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -f "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find $ANDROID_HOME -name sdkmanager 2>/dev/null | head -1)
+          fi
+          echo "使用 sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-33" "build-tools;33.0.2" || true
+          echo "--- 安装后 build-tools ---"
+          ls $ANDROID_HOME/build-tools/ || true
 
       - name: 授予 gradlew 执行权限
         run: chmod +x ./gradlew
@@ -63,13 +75,3 @@ jobs:
           name: JoyWskeyCopy-release
           path: JoyWskeyCopy-release.apk
           if-no-files-found: error
-
-      - name: 编译失败时导出日志
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            app/build/outputs/logs/
-            build/reports/
-          if-no-files-found: ignore
