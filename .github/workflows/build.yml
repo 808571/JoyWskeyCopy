@@ -23,21 +23,17 @@ jobs:
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls -d $ANDROID_HOME 2>/dev/null || echo "预装 SDK 目录不存在"
-          ls $ANDROID_HOME/platforms/ 2>/dev/null || true
-          ls $ANDROID_HOME/build-tools/ 2>/dev/null || true
-
-      - name: 安装所需 SDK 组件
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -f "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find $ANDROID_HOME -name sdkmanager 2>/dev/null | head -1)
-          fi
-          echo "使用 sdkmanager: $SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" "platforms;android-33" "build-tools;33.0.2" || true
-          echo "--- 安装后 build-tools ---"
+          ls $ANDROID_HOME/platforms/ || true
           ls $ANDROID_HOME/build-tools/ || true
+
+      - name: 确保存在 android-33 平台
+        run: |
+          if [ -d "$ANDROID_HOME/platforms/android-33" ]; then
+            echo "android-33 已存在，跳过安装"
+          else
+            echo "缺少 android-33，开始安装"
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-33" </dev/null
+          fi
 
       - name: 授予 gradlew 执行权限
         run: chmod +x ./gradlew
